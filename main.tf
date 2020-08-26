@@ -147,10 +147,11 @@ locals {
         "awslogs-stream-prefix" : "container"
       }
     }
-    command     = var.task_container_command
-    environment = local.task_environment
-    secrets     = local.task_secrets
-    ulimits     = var.task_container_ulimits
+    command       = var.task_container_command
+    environment   = local.task_environment
+    secrets       = local.task_secrets
+    ulimits       = var.task_container_ulimits
+    docker_labels = var.task_container_docker_labels
     repository_credentials = var.repository_credentials == "" ? null : {
       credentialsParameter = var.repository_credentials
     }
