@@ -151,7 +151,7 @@ locals {
     environment   = local.task_environment
     secrets       = local.task_secrets
     ulimits       = var.task_container_ulimits
-    docker_labels = var.task_container_docker_labels
+    dockerLabels = var.task_container_docker_labels
     repository_credentials = var.repository_credentials == "" ? null : {
       credentialsParameter = var.repository_credentials
     }
