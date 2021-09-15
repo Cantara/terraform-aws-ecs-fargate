@@ -171,3 +171,15 @@ variable "repository_credentials_kms_key" {
   type        = string
 }
 
+variable "circuit_breaker_enable" {
+  type        = bool
+  description = "whether or not to enable the deployment circuit breaker. This prevents re-deployment cycles on failing health checks for example"
+  default     = false
+}
+
+variable "circuit_breaker_rollback" {
+  type        = bool
+  description = "whether or not to enable the deployment circuit breaker to roll back to a previous task definition if deployment fails"
+  default     = false
+
+}
