@@ -201,6 +201,12 @@ resource "aws_ecs_service" "service" {
     # The deployment controller type to use. Valid values: CODE_DEPLOY, ECS.
     type = var.deployment_controller_type
   }
+
+  deployment_circuit_breaker {
+    enable   = var.circuit_breaker_enable
+    rollback = var.circuit_breaker_rollback
+  }
+
 }
 
 # HACK: The workaround used in ecs/service does not work for some reason in this module, this fixes the following error:
