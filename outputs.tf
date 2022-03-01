@@ -8,17 +8,12 @@ output "service_arn" {
 
 output "target_group_arn" {
   description = "The ARN of the Target Group."
-  value       = aws_lb_target_group.task.arn
-}
-
-output "target_group_arn_suffix" {
-  description = "The ARN suffix for use with CloudWatch Metrics."
-  value       = aws_lb_target_group.task.arn_suffix
+  value       = var.lb_arn == "" ? null : aws_lb_target_group.task[0].arn
 }
 
 output "target_group_name" {
   description = "The Name of the Target Group."
-  value       = aws_lb_target_group.task.name
+  value       = var.lb_arn == "" ? null : aws_lb_target_group.task[0].name
 }
 
 output "task_role_arn" {
@@ -31,8 +26,13 @@ output "task_role_name" {
   value       = aws_iam_role.task.name
 }
 
-output "execution_role_name" {
-  description = "The name of the execution role."
+output "task_execution_role_arn" {
+  description = "The Amazon Resource Name (ARN) specifying the execution service role."
+  value       = aws_iam_role.execution.arn
+}
+
+output "task_execution_role_name" {
+  description = "The name of the execution service role."
   value       = aws_iam_role.execution.name
 }
 
@@ -49,5 +49,10 @@ output "service_name" {
 output "log_group_name" {
   description = "The name of the Cloudwatch log group for the task."
   value       = aws_cloudwatch_log_group.main.name
+}
+
+output "desired_count" {
+  description = "Desired count"
+  value       = var.desired_count
 }
 
