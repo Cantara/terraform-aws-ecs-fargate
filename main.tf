@@ -16,16 +16,15 @@ resource "aws_cloudwatch_log_group" "main" {
 # IAM - Task execution role, needed to pull ECR images etc.
 # ------------------------------------------------------------------------------
 resource "aws_iam_role" "execution" {
-  name                 = "${var.name_prefix}-task-execution-role"
+  name                 = "${var.name_prefix}${var.aws_iam_role_execution_suffix}"
   assume_role_policy   = data.aws_iam_policy_document.task_assume.json
   permissions_boundary = var.task_role_permissions_boundary_arn
 }
 
 resource "aws_iam_role_policy" "task_execution" {
-  depends_on = [aws_ecs_service.service]
-  name       = "${var.name_prefix}-task-execution"
-  role       = aws_iam_role.execution.id
-  policy     = data.aws_iam_policy_document.task_execution_permissions.json
+  name   = "${var.name_prefix}-task-execution"
+  role   = aws_iam_role.execution.id
+  policy = data.aws_iam_policy_document.task_execution_permissions.json
 }
 
 resource "aws_iam_role_policy" "read_repository_credentials" {
@@ -35,13 +34,18 @@ resource "aws_iam_role_policy" "read_repository_credentials" {
   policy = data.aws_iam_policy_document.read_repository_credentials.json
 }
 
+resource "aws_iam_role_policy" "read_task_container_secrets" {
+  name   = "${var.name_prefix}-read-task-container-secrets"
+  role   = aws_iam_role.execution.id
+  policy = data.aws_iam_policy_document.task_container_secrets.json
+}
+
 # ------------------------------------------------------------------------------
 # IAM - Task role, basic. Users of the module will append policies to this role
 # when they use the module. S3, Dynamo permissions etc etc.
 # ------------------------------------------------------------------------------
-
 resource "aws_iam_role" "task" {
-  name                 = "${var.name_prefix}-task-role"
+  name                 = "${var.name_prefix}${var.aws_iam_role_task_suffix}"
   assume_role_policy   = data.aws_iam_policy_document.task_assume.json
   permissions_boundary = var.task_role_permissions_boundary_arn
 }
@@ -81,6 +85,8 @@ resource "aws_security_group_rule" "egress_service" {
 # LB Target group
 # ------------------------------------------------------------------------------
 resource "aws_lb_target_group" "task" {
+  name        = "${var.name_prefix}-${var.task_container_port}"
+  count       = var.lb_arn == "" ? 0 : 1
   vpc_id      = var.vpc_id
   protocol    = var.task_container_protocol
   port        = var.task_container_port
@@ -99,6 +105,7 @@ resource "aws_lb_target_group" "task" {
       unhealthy_threshold = lookup(health_check.value, "unhealthy_threshold", null)
     }
   }
+  protocol_version = var.protocol_version
 
   # NOTE: TF is unable to destroy a target group while a listener is attached,
   # therefor we have to create a new one before destroying the old. This also means
@@ -119,48 +126,34 @@ resource "aws_lb_target_group" "task" {
 # ECS Task/Service
 # ------------------------------------------------------------------------------
 locals {
-  task_environment = [
-    for k, v in var.task_container_environment : {
-      name  = k
-      value = v
-    }
-  ]
-  task_secrets = [
-    for k, v in var.task_container_secrets : {
-      name      = k
-      valueFrom = v
-    }
-  ]
-}
+  log_multiline_pattern        = var.log_multiline_pattern != "" ? { "awslogs-multiline-pattern" = var.log_multiline_pattern } : null
+  task_container_secrets       = length(var.task_container_secrets) > 0 ? { "secrets" = var.task_container_secrets } : null
+  repository_credentials       = length(var.repository_credentials) > 0 ? { "repositoryCredentials" = { "credentialsParameter" = var.repository_credentials } } : null
+  task_container_port_mappings = var.task_container_port == 0 ? var.task_container_port_mappings : concat(var.task_container_port_mappings, [{ containerPort = var.task_container_port, hostPort = var.task_container_port, protocol = "tcp" }])
+  task_container_environment   = [for k, v in var.task_container_environment : { name = k, value = v }]
+  task_container_mount_points  = [for v in var.efs_volumes : { containerPath = v.mount_point, readOnly = v.readOnly, sourceVolume = v.name }]
 
-locals {
-  container_definition = {
-    name      = var.container_name != "" ? var.container_name : var.name_prefix
-    image     = var.task_container_image
-    essential = true
-    portMappings = [{
-      containerPort = var.task_container_port,
-      hostPort      = var.task_container_port,
-      protocol      = "tcp"
-    }]
-    logConfiguration = {
-      "logDriver" : "awslogs",
-      "options" : {
-        "awslogs-group" : aws_cloudwatch_log_group.main.name,
-        "awslogs-region" : data.aws_region.current.name,
-        "awslogs-stream-prefix" : "container"
-      }
+  log_configuration_options = merge({
+    "awslogs-group"         = aws_cloudwatch_log_group.main.name
+    "awslogs-region"        = data.aws_region.current.name
+    "awslogs-stream-prefix" = "container"
+  }, local.log_multiline_pattern)
+
+  container_definition = merge({
+    "name"         = var.container_name != "" ? var.container_name : var.name_prefix
+    "image"        = var.task_container_image,
+    "essential"    = true
+    "portMappings" = local.task_container_port_mappings
+    "stopTimeout"  = var.stop_timeout
+    "command"      = var.task_container_command
+    "environment"  = local.task_container_environment
+    "MountPoints"  = local.task_container_mount_points
+    "logConfiguration" = {
+      "logDriver" = "awslogs"
+      "options"   = local.log_configuration_options
     }
-    command      = var.task_container_command
-    environment  = local.task_environment
-    secrets      = local.task_secrets
-    ulimits      = var.task_container_ulimits
-    dockerLabels = var.task_container_docker_labels
-    repository_credentials = var.repository_credentials == "" ? null : {
-      credentialsParameter = var.repository_credentials
-    }
-  }
-  container_definition_json = jsonencode(local.container_definition)
+    "privileged" : var.privileged
+  }, local.task_container_secrets, local.repository_credentials)
 }
 
 resource "aws_ecs_task_definition" "task" {
@@ -171,11 +164,32 @@ resource "aws_ecs_task_definition" "task" {
   cpu                      = var.task_definition_cpu
   memory                   = var.task_definition_memory
   task_role_arn            = aws_iam_role.task.arn
-  container_definitions    = "[${local.container_definition_json}]"
+  dynamic "volume" {
+    for_each = var.efs_volumes
+    content {
+      name = volume.value["name"]
+      efs_volume_configuration {
+        file_system_id     = volume.value["file_system_id"]
+        root_directory     = volume.value["root_directory"]
+        transit_encryption = "ENABLED"
+        authorization_config {
+          access_point_id = volume.value["access_point_id"]
+          iam             = "ENABLED"
+        }
+      }
+    }
+  }
+  container_definitions = jsonencode([local.container_definition])
 }
 
 resource "aws_ecs_service" "service" {
-  depends_on                         = [null_resource.lb_exists]
+  depends_on = [
+    null_resource.lb_exists,
+    aws_iam_role_policy.task_execution,
+    aws_iam_role_policy.log_agent,
+    aws_iam_role_policy.read_repository_credentials,
+    aws_iam_role_policy.read_task_container_secrets,
+  ]
   name                               = var.name_prefix
   cluster                            = var.cluster_id
   task_definition                    = aws_ecs_task_definition.task.arn
@@ -183,18 +197,22 @@ resource "aws_ecs_service" "service" {
   launch_type                        = "FARGATE"
   deployment_minimum_healthy_percent = var.deployment_minimum_healthy_percent
   deployment_maximum_percent         = var.deployment_maximum_percent
-  health_check_grace_period_seconds  = var.health_check_grace_period_seconds
+  health_check_grace_period_seconds  = var.lb_arn == "" ? null : var.health_check_grace_period_seconds
+  wait_for_steady_state              = var.wait_for_steady_state
 
   network_configuration {
     subnets          = var.private_subnet_ids
-    security_groups  = [aws_security_group.ecs_service.id]
+    security_groups  = concat([aws_security_group.ecs_service.id], var.service_sg_ids)
     assign_public_ip = var.task_container_assign_public_ip
   }
 
-  load_balancer {
-    container_name   = var.container_name != "" ? var.container_name : var.name_prefix
-    container_port   = var.task_container_port
-    target_group_arn = aws_lb_target_group.task.arn
+  dynamic "load_balancer" {
+    for_each = var.lb_arn == "" ? [] : [1]
+    content {
+      container_name   = var.container_name != "" ? var.container_name : var.name_prefix
+      container_port   = var.task_container_port
+      target_group_arn = aws_lb_target_group.task[0].arn
+    }
   }
 
   deployment_controller {
@@ -203,19 +221,25 @@ resource "aws_ecs_service" "service" {
   }
 
   deployment_circuit_breaker {
-    enable   = var.circuit_breaker_enable
-    rollback = var.circuit_breaker_rollback
+    enable   = var.deployment_circuit_breaker.enable
+    rollback = var.deployment_circuit_breaker.rollback
   }
 
+  dynamic "service_registries" {
+    for_each = var.service_registry_arn == "" ? [] : [1]
+    content {
+      registry_arn   = var.service_registry_arn
+      container_port = var.with_service_discovery_srv_record ? var.task_container_port : null
+      container_name = var.container_name != "" ? var.container_name : var.name_prefix
+    }
+  }
 }
 
 # HACK: The workaround used in ecs/service does not work for some reason in this module, this fixes the following error:
 # "The target group with targetGroupArn arn:aws:elasticloadbalancing:... does not have an associated load balancer."
 # see https://github.com/hashicorp/terraform/issues/12634.
+#     https://github.com/terraform-providers/terraform-provider-aws/issues/3495
 # Service depends on this resources which prevents it from being created until the LB is ready
 resource "null_resource" "lb_exists" {
-  triggers = {
-    alb_name = var.lb_arn
-  }
+  triggers = var.lb_arn == "" ? {} : { alb_name = var.lb_arn }
 }
-

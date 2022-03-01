@@ -12,6 +12,18 @@ variable "container_name" {
   type        = string
 }
 
+variable "task_container_secrets" {
+  description = "See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-taskdefinition-secret.html . Beware: Only Secrets Manager secrets supported. The necessary permissions will be added automatically."
+  type        = list(object({ name = string, valueFrom = string }))
+  default     = []
+}
+
+variable "task_container_secrets_kms_key" {
+  type        = string
+  description = ""
+  default     = "alias/aws/secretsmanager"
+}
+
 variable "vpc_id" {
   description = "The VPC ID."
   type        = string
@@ -33,6 +45,7 @@ variable "task_container_image" {
 }
 
 variable "lb_arn" {
+  default     = ""
   description = "Arn for the LB for which the service should be attach to."
   type        = string
 }
@@ -41,11 +54,6 @@ variable "desired_count" {
   description = "The number of instances of the task definitions to place and keep running."
   default     = 1
   type        = number
-}
-
-variable "task_role_permissions_boundary_arn" {
-  description = "The ARN of a permissions boundary to add to the roles created by the module"
-  default     = ""
 }
 
 variable "task_container_assign_public_ip" {
@@ -57,6 +65,17 @@ variable "task_container_assign_public_ip" {
 variable "task_container_port" {
   description = "Port that the container exposes."
   type        = number
+  default     = 0
+}
+
+variable "task_container_port_mappings" {
+  description = "List of port objects that the container exposes in addition to the task_container_port."
+  type = list(object({
+    containerPort = number
+    hostPort      = number
+    protocol      = string
+  }))
+  default = []
 }
 
 variable "task_container_protocol" {
@@ -83,38 +102,10 @@ variable "task_container_command" {
   type        = list(string)
 }
 
-variable "task_container_docker_labels" {
-  type        = map(string)
-  description = "Docker labels to set for the container"
-  default     = null
-}
-
 variable "task_container_environment" {
   description = "The environment variables to pass to a container."
   default     = {}
   type        = map(string)
-}
-
-variable "task_container_environment_count" {
-  description = "NOTE: This exists purely to calculate count in Terraform. Should equal the length of your environment map."
-  default     = 0
-  type        = number
-}
-
-variable "task_container_secrets" {
-  description = "The secret variables to pass to a container."
-  default     = {}
-  type        = map(string)
-}
-
-variable "task_container_ulimits" {
-  type = list(object({
-    name      = string
-    hardLimit = number
-    softLimit = number
-  }))
-  description = "(Optional) Container ulimit settings. This is a list of maps, where each map should contain \"name\", \"hardLimit\" and \"softLimit\""
-  default     = null
 }
 
 variable "log_retention_in_days" {
@@ -123,9 +114,16 @@ variable "log_retention_in_days" {
   type        = number
 }
 
+variable "log_multiline_pattern" {
+  description = "Optional regular expression. Log messages will consist of a line that matches expression and any following lines that don't"
+  default     = ""
+  type        = string
+}
+
 variable "health_check" {
   description = "A health block containing health check settings for the target group. Overrides the defaults."
   type        = map(string)
+  default     = {}
 }
 
 variable "health_check_grace_period_seconds" {
@@ -171,15 +169,81 @@ variable "repository_credentials_kms_key" {
   type        = string
 }
 
-variable "circuit_breaker_enable" {
+variable "service_registry_arn" {
+  default     = ""
+  description = "ARN of aws_service_discovery_service resource"
+  type        = string
+}
+
+variable "with_service_discovery_srv_record" {
+  default     = true
   type        = bool
-  description = "whether or not to enable the deployment circuit breaker. This prevents re-deployment cycles on failing health checks for example"
+  description = "Set to false if you specify a SRV DNS record in aws_service_discovery_service. If only A record, set this to false."
+}
+
+variable "stop_timeout" {
+  description = "Time duration (in seconds) to wait before the container is forcefully killed if it doesn't exit normally on its own. On Fargate the maximum value is 120 seconds."
+  default     = 30
+}
+
+variable "task_role_permissions_boundary_arn" {
+  description = "ARN of the policy that is used to set the permissions boundary for the task (and task execution) role."
+  default     = ""
+  type        = string
+}
+
+variable "protocol_version" {
+  description = "The protocol (HTTP) version."
+  default     = "HTTP1"
+  type        = string
+}
+
+variable "efs_volumes" {
+  description = "Volumes definitions"
+  default     = []
+  type = list(object({
+    name            = string
+    file_system_id  = string
+    root_directory  = string
+    mount_point     = string
+    readOnly        = bool
+    access_point_id = string
+  }))
+}
+
+variable "privileged" {
+  description = "When this parameter is true, the container is given elevated privileges on the host container instance"
+  default     = false
+  type        = bool
+}
+
+variable "wait_for_steady_state" {
+  description = "Wait for the service to reach a steady state (like aws ecs wait services-stable) before continuing."
+  type        = bool
   default     = false
 }
 
-variable "circuit_breaker_rollback" {
-  type        = bool
-  description = "whether or not to enable the deployment circuit breaker to roll back to a previous task definition if deployment fails"
-  default     = false
+variable "deployment_circuit_breaker" {
+  description = "Circuit breaking configuration for the ECS service."
+  type        = object({ enable = bool, rollback = bool })
+  default     = { enable = false, rollback = false }
+}
 
+
+variable "aws_iam_role_execution_suffix" {
+  description = "Name suffix for task execution IAM role"
+  type        = string
+  default     = "-task-execution-role"
+}
+
+variable "aws_iam_role_task_suffix" {
+  description = "Name suffix for task IAM role"
+  type        = string
+  default     = "-task-role"
+}
+
+variable "service_sg_ids" {
+  description = "List of security group to use"
+  type        = list(string)
+  default     = []
 }
