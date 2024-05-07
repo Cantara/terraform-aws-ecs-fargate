@@ -201,6 +201,7 @@ resource "aws_ecs_task_definition" "task" {
     operating_system_family = var.task_definition_os_family
     cpu_architecture        = var.task_definition_cpu_arch
   }
+  tags = var.tags
 }
 
 resource "aws_ecs_service" "service" {
