@@ -112,7 +112,7 @@ module "fargate" {
     TEST_VARIABLE = "TEST_VALUE"
   }
 
-  task_container_health_check = {
+  container_health_check = {
     retries     = 3,
     command     = ["CMD-SHELL", "curl -f http://localhost:9000/ || exit 1"],
     timeout     = 5,
